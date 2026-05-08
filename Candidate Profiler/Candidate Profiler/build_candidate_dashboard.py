@@ -471,28 +471,28 @@ table.dt tr.t25 td{{background:rgba(16,185,129,0.07);border-left:3px solid var(-
         <div class="pgrid">
           <div class="panel acc col-6">
             <div class="ph">
-              <div><div class="ptitle">Post-MBA Industry</div><div class="psub">Click a bar to filter</div></div>
-              <span class="ptag">mix</span>
+              <div><div class="ptitle">Avg Salary by Industry</div><div class="psub">Where the money is — click to filter</div></div>
+              <span class="ptag">$</span>
             </div>
             <div class="cb"><canvas id="ch-industry"></canvas></div>
           </div>
           <div class="panel col-6">
             <div class="ph">
-              <div><div class="ptitle">School Distribution</div><div class="psub">Click a slice to filter</div></div>
-              <span class="ptag">%</span>
+              <div><div class="ptitle">Placement Rate by School</div><div class="psub">% with any top offer — click to filter</div></div>
+              <span class="ptag">rate</span>
             </div>
             <div class="cb-s"><canvas id="ch-school"></canvas></div>
           </div>
           <div class="panel col-6">
             <div class="ph">
-              <div><div class="ptitle">Graduation Year</div><div class="psub">Click a bar to filter</div></div>
-              <span class="ptag">time</span>
+              <div><div class="ptitle">Median Salary Trend</div><div class="psub">By graduation year — click to filter</div></div>
+              <span class="ptag">trend</span>
             </div>
             <div class="cb"><canvas id="ch-year"></canvas></div>
           </div>
           <div class="panel acc col-6">
             <div class="ph">
-              <div><div class="ptitle">GPA vs Post-MBA Salary</div><div class="psub">Trend line with R²</div></div>
+              <div><div class="ptitle">Work Experience vs Salary</div><div class="psub">Pre-MBA years vs post-MBA outcome · trend line</div></div>
               <span class="ptag">scatter</span>
             </div>
             <div class="cb"><canvas id="ch-scatter"></canvas></div>
@@ -811,20 +811,39 @@ window.__DATA = {payload};
     requestAnimationFrame(step);
   }}
 
+  function median(arr){{
+    const a=arr.filter(x=>x!=null&&isFinite(+x)).map(Number).sort((a,b)=>a-b);
+    if(!a.length)return null;
+    const m=Math.floor(a.length/2);
+    return a.length%2?a[m]:(a[m-1]+a[m])/2;
+  }}
+  function pctAnyOffer(rows){{
+    if(!rows.length)return 0;
+    const cols=['Offer in Big Tech','Offer in Consulting','Offer in Big Banks'];
+    return Math.round(rows.filter(r=>cols.some(c=>String(r[c]).toLowerCase()==='yes')).length/rows.length*1000)/10;
+  }}
+  function topValue(rows,col){{
+    const m=countBy(rows,col);
+    const k=Object.keys(m).sort((a,b)=>m[b]-m[a]);
+    return k.length?{{label:k[0],count:m[k[0]]}}:null;
+  }}
+
   function renderKPI(rows){{
-    const avg$=mean(rows.map(r=>r['Post-MBA Salary']));
-    const avgG=mean(rows.map(r=>r['GMAT']));
-    const pt=pctYes(rows,'Offer in Big Tech');
+    const med$=median(rows.map(r=>r['Post-MBA Salary']));
+    const anyOffer=pctAnyOffer(rows);
+    const avgWrk=mean(rows.map(r=>r['Work Experience (Years)']));
+    const topInd=topValue(rows,'Post-MBA Industry');
     const strip=document.getElementById('kpi-strip');
     strip.innerHTML=
-      kcard('Profiles',         'kv-n', '') +
-      kcard('Avg Salary',       'kv-s', 'mean compensation') +
-      kcard('Avg GMAT',         'kv-g', 'exam score') +
-      kcard('Big Tech Offer',   'kv-t', '% answering Yes');
-    animCount(strip.querySelector('.kv-n'),rows.length,v=>Math.round(v).toLocaleString());
-    animCount(strip.querySelector('.kv-s'),avg$!=null?avg$:0,v=>avg$!=null?'$'+Math.round(v).toLocaleString():'—');
-    animCount(strip.querySelector('.kv-g'),avgG!=null?avgG:0,v=>avgG!=null?Math.round(v).toString():'—');
-    animCount(strip.querySelector('.kv-t'),pt,v=>(Math.round(v*10)/10)+'%');
+      kcard('Median Salary',     'kv-s', 'post-MBA compensation') +
+      kcard('Any Top Offer',     'kv-o', 'Tech · Consulting · Banks') +
+      kcard('Avg Pre-MBA Exp',   'kv-w', 'years before MBA') +
+      kcard('Top Destination',   'kv-i', topInd?topInd.count+' graduates':'—');
+    animCount(strip.querySelector('.kv-s'),med$!=null?med$:0,v=>med$!=null?'$'+Math.round(v).toLocaleString():'—');
+    animCount(strip.querySelector('.kv-o'),anyOffer,v=>(Math.round(v*10)/10)+'%');
+    animCount(strip.querySelector('.kv-w'),avgWrk!=null?avgWrk:0,v=>avgWrk!=null?(Math.round(v*10)/10)+' yrs':'—');
+    // Top destination is text — set directly, no animation
+    strip.querySelector('.kv-i').textContent=topInd?topInd.label:'—';
   }}
   function kcard(label,cls,sub){{
     return '<div class="kpi"><div class="klbl">'+label+'</div><div class="kval '+cls+'">0</div>'+(sub?'<div class="ksub">'+sub+'</div>':'')+'</div>';
@@ -848,19 +867,30 @@ window.__DATA = {payload};
   function renderOverview(rows){{
     ['industry','school','year','scatter'].forEach(kill);
     if(!rows.length){{
-      ['industry','year'].forEach(id=>emptyC(id,'bar'));
-      emptyC('school','doughnut');emptyC('scatter','scatter');return;
+      ['industry','school','year'].forEach(id=>emptyC(id,'bar'));
+      emptyC('scatter','scatter');return;
     }}
-    // Industry bar
-    const byI=countBy(rows,'Post-MBA Industry');
-    const labI=Object.keys(byI).sort((a,b)=>byI[b]-byI[a]);
+
+    // ── Chart 1: Avg salary by industry (horizontal bar) ──────────────────
+    const inds=[...new Set(rows.map(r=>r['Post-MBA Industry']).filter(Boolean))];
+    const indAvg=inds.map(ind=>{{
+      const r=rows.filter(x=>x['Post-MBA Industry']===ind);
+      return {{ind,avg:mean(r.map(x=>x['Post-MBA Salary']))||0,n:r.length}};
+    }}).sort((a,b)=>b.avg-a.avg);
+    const labI=indAvg.map(d=>d.ind);
     charts.industry=new Chart(document.getElementById('ch-industry'),{{
       type:'bar',
-      data:{{labels:labI,datasets:[{{label:'Count',data:labI.map(k=>byI[k]),backgroundColor:pal(labI.length),borderRadius:4,borderWidth:0}}]}},
+      data:{{labels:labI,datasets:[{{
+        label:'Avg Salary',data:indAvg.map(d=>d.avg),
+        backgroundColor:pal(labI.length),borderRadius:4,borderWidth:0
+      }}]}},
       options:{{
         indexAxis:'y',responsive:true,maintainAspectRatio:false,
-        plugins:{{legend:{{display:false}}}},
-        scales:{{x:{{...ax(true)}},y:{{...ax(false),grid:{{display:false}},ticks:{{color:'#1e1b4b',font:{{size:11}}}}}}}},
+        plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:c=>fmtMoney(c.parsed.x)+' avg'}}}}}},
+        scales:{{
+          x:{{...ax(true),ticks:{{callback:v=>'$'+Math.round(+v/1000)+'k',color:'#6b7280',font:{{size:11}}}}}},
+          y:{{...ax(false),grid:{{display:false}},ticks:{{color:'#1e1b4b',font:{{size:11}}}}}}
+        }},
         onClick:(_,els)=>{{
           if(!els.length)return;
           const lbl=labI[els[0].index];
@@ -870,14 +900,30 @@ window.__DATA = {payload};
         }}
       }}
     }});
-    // School doughnut
-    const byS=countBy(rows,'School'),labS=Object.keys(byS);
+
+    // ── Chart 2: Placement rate by school (any top offer %) ───────────────
+    const schs=[...new Set(rows.map(r=>r['School']).filter(Boolean))].sort();
+    const schRate=schs.map(s=>{{
+      const r=rows.filter(x=>x['School']===s);
+      return pctAnyOffer(r);
+    }});
+    const schOrder=schs.map((s,i)=>i).sort((a,b)=>schRate[b]-schRate[a]);
+    const labS=schOrder.map(i=>schs[i]);
+    const rateS=schOrder.map(i=>schRate[i]);
     charts.school=new Chart(document.getElementById('ch-school'),{{
-      type:'doughnut',
-      data:{{labels:labS,datasets:[{{data:labS.map(k=>byS[k]),backgroundColor:pal(labS.length),borderWidth:2,borderColor:'#fff'}}]}},
+      type:'bar',
+      data:{{labels:labS,datasets:[{{
+        label:'Any Top Offer %',data:rateS,
+        backgroundColor:'rgba(16,185,129,0.65)',borderColor:P.emerald,
+        borderRadius:4,borderWidth:0
+      }}]}},
       options:{{
-        responsive:true,maintainAspectRatio:false,cutout:'55%',
-        plugins:{{legend:{{position:'right',labels:{{color:'#1e1b4b',font:{{size:11}},boxWidth:10}}}}}},
+        indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:c=>c.parsed.x+'% placed'}}}}}},
+        scales:{{
+          x:{{...ax(true),max:100,ticks:{{callback:v=>v+'%',color:'#6b7280',font:{{size:11}}}}}},
+          y:{{...ax(false),grid:{{display:false}},ticks:{{color:'#1e1b4b',font:{{size:11}}}}}}
+        }},
         onClick:(_,els)=>{{
           if(!els.length)return;
           const lbl=labS[els[0].index];
@@ -887,36 +933,47 @@ window.__DATA = {payload};
         }}
       }}
     }});
-    // Year bar
-    const byY=countBy(rows,'Graduation Year'),labY=Object.keys(byY).sort((a,b)=>+a-+b);
+
+    // ── Chart 3: Median salary trend by graduation year (line) ────────────
+    const years=[...new Set(rows.map(r=>r['Graduation Year']).filter(Boolean))].sort((a,b)=>+a-+b);
+    const medByYear=years.map(y=>median(rows.filter(r=>String(r['Graduation Year'])===String(y)).map(r=>r['Post-MBA Salary'])));
     charts.year=new Chart(document.getElementById('ch-year'),{{
-      type:'bar',
-      data:{{labels:labY,datasets:[{{label:'Headcount',data:labY.map(k=>byY[k]),backgroundColor:'rgba(99,102,241,0.55)',borderColor:P.indigo,borderWidth:1,borderRadius:4}}]}},
+      type:'line',
+      data:{{labels:years,datasets:[{{
+        label:'Median Salary',data:medByYear,
+        borderColor:P.indigo,backgroundColor:'rgba(99,102,241,0.08)',
+        borderWidth:2.5,pointRadius:5,pointHoverRadius:7,
+        pointBackgroundColor:P.indigo,fill:true,tension:0.35
+      }}]}},
       options:{{
         responsive:true,maintainAspectRatio:false,
-        plugins:{{legend:{{display:false}}}},
-        scales:{{y:{{...ax(false),beginAtZero:true}},x:{{...ax(true),grid:{{display:false}},ticks:{{color:'#1e1b4b',font:{{size:11}}}}}}}},
+        plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:c=>fmtMoney(c.parsed.y)+' median'}}}}}},
+        scales:{{
+          y:{{...ax(false),ticks:{{callback:v=>'$'+Math.round(+v/1000)+'k',color:'#6b7280',font:{{size:11}}}}}},
+          x:{{...ax(true),grid:{{display:false}},ticks:{{color:'#1e1b4b',font:{{size:11}}}}}}
+        }},
         onClick:(_,els)=>{{
           if(!els.length)return;
-          const lbl=labY[els[0].index];
+          const lbl=String(years[els[0].index]);
           const el=document.getElementById('f-year');
           el.value=el.value===lbl?'all':lbl;
           page=0;refresh();
         }}
       }}
     }});
-    // Scatter + regression
-    const samp=rows.filter(r=>r['GPA']!=null&&r['Post-MBA Salary']!=null).slice(0,400);
-    const pts=samp.map(r=>({{x:+r['GPA'],y:+r['Post-MBA Salary']}}));
+
+    // ── Chart 4: Work experience vs salary scatter + regression ───────────
+    const samp=rows.filter(r=>r['Work Experience (Years)']!=null&&r['Post-MBA Salary']!=null).slice(0,500);
+    const pts=samp.map(r=>({{x:+r['Work Experience (Years)'],y:+r['Post-MBA Salary']}})).filter(p=>isFinite(p.x)&&isFinite(p.y));
     const reg=linReg(pts);
-    const datasets=[{{
+    const scatterDS=[{{
       type:'scatter',label:'Candidates',data:pts,
-      backgroundColor:'rgba(139,92,246,0.28)',borderColor:P.violet,
-      pointRadius:3,pointHoverRadius:5
+      backgroundColor:'rgba(139,92,246,0.25)',borderColor:P.violet,
+      pointRadius:3,pointHoverRadius:6
     }}];
     if(reg){{
       const xs=[Math.min(...pts.map(p=>p.x)),Math.max(...pts.map(p=>p.x))];
-      datasets.push({{
+      scatterDS.push({{
         type:'line',label:'Trend',
         data:xs.map(x=>({{x,y:reg.slope*x+reg.int}})),
         borderColor:P.indigo,borderWidth:2,borderDash:[5,4],
@@ -924,17 +981,17 @@ window.__DATA = {payload};
       }});
       document.getElementById('scatter-r2').textContent=
         'R² = '+(Math.round(reg.r2*1000)/1000)+
-        '  ·  slope = '+Math.round(reg.slope/1000)+'k per GPA point';
+        '  ·  each additional year ≈ +$'+Math.round(reg.slope/1000)+'k salary';
     }}
     charts.scatter=new Chart(document.getElementById('ch-scatter'),{{
       type:'scatter',
-      data:{{datasets}},
+      data:{{datasets:scatterDS}},
       options:{{
         responsive:true,maintainAspectRatio:false,
         plugins:{{legend:{{display:false}}}},
         scales:{{
-          x:{{...ax(true),title:{{display:true,text:'GPA',color:'#6b7280',font:{{size:11}}}}}},
-          y:{{...ax(false),title:{{display:true,text:'Salary',color:'#6b7280',font:{{size:11}}}},
+          x:{{...ax(true),title:{{display:true,text:'Pre-MBA Work Experience (yrs)',color:'#6b7280',font:{{size:11}}}}}},
+          y:{{...ax(false),title:{{display:true,text:'Post-MBA Salary',color:'#6b7280',font:{{size:11}}}},
             ticks:{{callback:v=>'$'+Math.round(+v/1000)+'k',color:'#6b7280',font:{{size:11}}}}}}
         }}
       }}
